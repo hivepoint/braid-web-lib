@@ -69,3 +69,5 @@ class ChannelsClientImpl implements ChannelsClient {
     return null;
   }
 }
+
+(window as any).ChannelsClient = ChannelsClientImpl;
