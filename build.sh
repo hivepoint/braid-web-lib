@@ -1,0 +1,1 @@
+browserify src/index.ts -p [ tsify --noImplicitAny ] > releases/channel-elements-lib.js
