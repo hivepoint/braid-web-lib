@@ -1,16 +1,21 @@
+export interface ProviderServiceList {
+  providerUrl: string;
+  serviceHomeUrl: string;
+  registrationUrl: string;
+  accountUrl: string;
+  createChannelUrl: string;
+  channelListUrl: string;
+}
+
 export interface RegistrationResponse {
   id: string;
   token: string;
-  providerUrl: string;
-  accountUrl: string;
-  createChannelUrl: string;
-  registerUrl: string;
+  services: ProviderServiceList;
 }
 
 export interface BraidResponse {
   version: number;
-  registerUrl: string;
-  serviceHomeUrl: string;
+  services: ProviderServiceList;
 }
 
 export interface ChannelCreateRequest {
@@ -27,14 +32,15 @@ export interface ChannelOptions {
   maxPayloadSize?: number;
   maxMessageRate?: number;
   maxDataRate?: number;
+  mode?: string; // many-to-many, one-to-many, many-to-one
 }
 
 export interface ChannelMemberInfo {
-  identity: any;
+  participantId: string;
+  details: any;
   isCreator: boolean;
-  added: number;
-  lastPresent: number;
-  status: string;
+  memberSince: number;
+  lastActive: number;
 }
 
 export interface GetChannelResponse {

@@ -30,8 +30,8 @@ export class ClientDb {
       request.onupgradeneeded = (event) => {
         const db = (event.target as any).result as IDBDatabase;
         if (!event.oldVersion) {
-          const store = db.createObjectStore(STORE_REGISTRIES, { keyPath: "registerUrl" });
-          store.createIndex("providerUrl", "providerUrl", { unique: true });
+          const store = db.createObjectStore(STORE_REGISTRIES, { keyPath: "services.registrationUrl" });
+          store.createIndex("providerUrl", "services.providerUrl", { unique: true });
         }
       };
     });
