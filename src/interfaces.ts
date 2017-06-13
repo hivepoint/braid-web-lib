@@ -4,6 +4,7 @@ export interface RegistrationResponse {
   providerUrl: string;
   accountUrl: string;
   createChannelUrl: string;
+  registerUrl: string;
 }
 
 export interface BraidResponse {

@@ -1,4 +1,5 @@
 import { Rest } from './rest';
+import { Utils } from './utils';
 import { RegistrationResponse, BraidResponse, ChannelCreateRequest, GetChannelResponse } from './interfaces';
 
 export * from './interfaces';
@@ -6,9 +7,10 @@ export * from './interfaces';
 export interface ChannelsClient {
   register(serverUrl: string, identity: any): Promise<RegistrationResponse>;
   createChannel(request: ChannelCreateRequest): Promise<GetChannelResponse>;
+  connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse>;
 }
 
-export class ChannelsClientImpl implements ChannelsClient {
+class ChannelsClientImpl implements ChannelsClient {
   private registrationMap: { [url: string]: RegistrationResponse } = {}
 
   async register(serverUrl: string, identity: any): Promise<RegistrationResponse> {
@@ -46,5 +48,12 @@ export class ChannelsClientImpl implements ChannelsClient {
     if (!registry) {
       throw new Error("Failed to create channel: Provider is not registered");
     }
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.post<GetChannelResponse>(registry.createChannelUrl, request, headers);
+    // TODO: persist channels????
+  }
+
+  async connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse> {
+    return null;
   }
 }
