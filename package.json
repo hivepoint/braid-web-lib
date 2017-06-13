@@ -1,0 +1,22 @@
+{
+  "name": "braid-web-lib",
+  "version": "0.1.0",
+  "description": "Braid client library for typescript/javascript",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SevogleAdmin/braid-web-lib.git"
+  },
+  "author": "Hivepoint, Inc.",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/SevogleAdmin/braid-web-lib/issues"
+  },
+  "homepage": "https://github.com/SevogleAdmin/braid-web-lib#readme",
+  "devDependencies": {
+    "typescript": "^2.3.4"
+  }
+}
