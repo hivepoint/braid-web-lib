@@ -4,7 +4,7 @@
   "description": "Braid client library for typescript/javascript",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "webpack -p"
   },
   "repository": {
     "type": "git",

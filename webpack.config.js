@@ -1,8 +1,8 @@
 module.exports = {
   entry: "./src/index.ts",
   output: {
-    filename: "channel-elements-lib.js",
-    path: __dirname
+    filename: "channel-elements-web-lib.js",
+    path: __dirname + "/dist/"
   },
   resolve: {
     extensions: [".ts"]
