@@ -82,4 +82,25 @@ export class ClientDb {
     });
   }
 
+  async getAllRegistries(): Promise<RegistrationResponse[]> {
+    return new Promise<RegistrationResponse[]>((resolve, reject) => {
+      const store = this.getStore(STORE_REGISTRIES, MODE_READ);
+      const request = store.openCursor();
+      const result: RegistrationResponse[] = [];
+      request.onerror = (event) => {
+        console.error("Failed to open registry cursor: ", event);
+        reject(new Error("Failed to open registry cursor: " + event));
+      };
+      request.onsuccess = (event) => {
+        const cursor = (event.target as any).result as IDBCursor;
+        if (cursor) {
+          result.push((cursor as any).value as RegistrationResponse);
+          cursor.continue();
+        } else {
+          resolve(result);
+        }
+      }
+    });
+  }
+
 }

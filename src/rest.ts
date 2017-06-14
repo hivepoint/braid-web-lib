@@ -2,7 +2,7 @@ export class Rest {
   static async get<T>(url: string, headers?: { [key: string]: string }): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const req = new XMLHttpRequest();
-      req.withCredentials = true;
+      req.withCredentials = false;
       req.open("GET", url);
       if (headers) {
         for (const key in headers) {
@@ -36,7 +36,7 @@ export class Rest {
   static async post<T>(url: string, object: any, headers?: { [key: string]: string }): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const req = new XMLHttpRequest();
-      req.withCredentials = true;
+      req.withCredentials = false;
       req.open("POST", url);
       if (headers) {
         for (const key in headers) {

@@ -1,14 +1,17 @@
 import { Rest } from './rest';
 import { Utils } from './utils';
 import { ClientDb } from './db';
-import { RegistrationResponse, BraidResponse, ChannelCreateRequest, GetChannelResponse } from './interfaces';
+import { RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse } from './interfaces';
 
 export * from './interfaces';
 
 export interface ChannelsClient {
   register(serverUrl: string, identity: any): Promise<RegistrationResponse>;
-  createChannel(request: ChannelCreateRequest): Promise<GetChannelResponse>;
+  createChannel(registryUrl: string, request: ChannelCreateRequest): Promise<GetChannelResponse>;
   connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse>;
+  getChannelsWithProvider(registryUrl: string): Promise<GetChannelResponse[]>;
+  listAllChannels(): Promise<GetChannelResponse[]>;
+  getChannel(registryUrl: string, channelUrl: string): Promise<GetChannelResponse>;
 }
 
 class ChannelsClientImpl implements ChannelsClient {
@@ -28,13 +31,12 @@ class ChannelsClientImpl implements ChannelsClient {
     if (cached) {
       return cached;
     }
-    const braidInfo = await Rest.get<BraidResponse>(serverUrl);
-    if (braidInfo && braidInfo.services.registrationUrl) {
-      const response = await this.getRegistry(braidInfo.services.registrationUrl, identity);
-      await this.db.saveRegistry(response);
+    const serverInfo = await Rest.get<ChannelServerResponse>(serverUrl);
+    if (serverInfo && serverInfo.services.registrationUrl) {
+      const response = await this.getRegistry(serverInfo.services.registrationUrl, identity);
       return response;
     } else {
-      throw new Error("Failed to fetch Braid server info.");
+      throw new Error("Failed to fetch channel server info.");
     }
   }
 
@@ -67,6 +69,58 @@ class ChannelsClientImpl implements ChannelsClient {
 
   async connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse> {
     return null;
+  }
+
+  async getChannelsWithProvider(url: string): Promise<GetChannelResponse[]> {
+    await this.ensureDb();
+    const result: GetChannelResponse[] = [];
+    let registry = await this.db.getRegistry(url);
+    if (!registry) {
+      registry = await this.db.getRegistry(null, url);
+    }
+    if (registry) {
+      const listResponse = await this.getChannelsFromRegistry(registry);
+      if (listResponse && listResponse.channels) {
+        for (const cs of listResponse.channels) {
+          result.push(cs);
+        }
+      }
+    }
+    return result;
+  }
+
+  async listAllChannels(): Promise<GetChannelResponse[]> {
+    await this.ensureDb();
+    const registeries = await this.db.getAllRegistries();
+    const result: GetChannelResponse[] = [];
+    for (var i = 0; i < registeries.length; i++) {
+      const registry = registeries[i];
+      const listResponse = await this.getChannelsFromRegistry(registry);
+      if (listResponse && listResponse.channels) {
+        for (const cs of listResponse.channels) {
+          result.push(cs);
+        }
+      }
+    }
+    result.sort((a, b) => {
+      return b.created - a.created;
+    });
+    return result;
+  }
+
+  private async getChannelsFromRegistry(registry: RegistrationResponse): Promise<ChannelListResponse> {
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.get<ChannelListResponse>(registry.services.channelListUrl, headers);
+  }
+
+  async getChannel(registryUrl: string, channelUrl: string): Promise<GetChannelResponse> {
+    await this.ensureDb();
+    const registry = await this.db.getRegistry(registryUrl);
+    if (!registry) {
+      throw new Error("Failed to fetch channel: Provider is not registered");
+    }
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.get<GetChannelResponse>(channelUrl, headers);
   }
 }
 
