@@ -17,8 +17,12 @@
   },
   "homepage": "https://github.com/SevogleAdmin/braid-web-lib#readme",
   "devDependencies": {
+    "@types/text-encoding": "0.0.30",
     "ts-loader": "^2.1.0",
     "typescript": "^2.3.4",
     "webpack": "^2.6.1"
+  },
+  "dependencies": {
+    "text-encoding": "^0.6.4"
   }
 }

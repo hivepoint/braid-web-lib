@@ -2,7 +2,10 @@ import { Rest } from './rest';
 import { Utils } from './utils';
 import { ClientDb } from './db';
 import { TransportManager } from './transport-manager';
-import { RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse } from './interfaces';
+import {
+  RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse,
+  JoinRequestDetails, JoinResponseDetails, MessageInfo
+} from './interfaces';
 
 export * from './interfaces';
 
@@ -14,12 +17,14 @@ export interface ChannelsClient {
   listAllChannels(): Promise<GetChannelResponse[]>;
   getChannel(registryUrl: string, channelUrl: string): Promise<GetChannelResponse>;
 
-  connectTransport(registryUrl: string, url: string): Promise<void>;
+  connectTransport(registryUrl: string, channelId: string, url: string): Promise<void>;
+  joinChannel(request: JoinRequestDetails): Promise<JoinResponseDetails>;
 }
 
 class ChannelsClientImpl implements ChannelsClient {
   private db: ClientDb;
   private transport: TransportManager;
+  private joinedChannels: { [channelId: string]: JoinResponseDetails } = {};
 
   constructor() {
     this.db = new ClientDb();
@@ -128,7 +133,7 @@ class ChannelsClientImpl implements ChannelsClient {
     return await Rest.get<GetChannelResponse>(channelUrl, headers);
   }
 
-  async connectTransport(registryUrl: string, url: string): Promise<void> {
+  async connectTransport(registryUrl: string, channelId: string, url: string): Promise<void> {
     await this.ensureDb();
     const registry = await this.db.getRegistry(registryUrl);
     if (!registry) {
@@ -144,7 +149,47 @@ class ChannelsClientImpl implements ChannelsClient {
     query += "id=" + encodeURIComponent(registry.id);
     query += "&token=" + encodeURIComponent(registry.token);
     fullUrl.search = query;
-    await this.transport.connect(fullUrl.toString());
+    await this.transport.connect(channelId, fullUrl.toString());
+  }
+
+  async joinChannel(request: JoinRequestDetails): Promise<JoinResponseDetails> {
+    return new Promise<JoinResponseDetails>((resolve, reject) => {
+      this.transport.sendControlMessageByChannel(request.channelId, 'join', request, (message, err) => {
+        if (err) {
+          reject(err);
+        } else {
+          const controlMessage = message.controlMessagePayload.jsonMessage;
+          const joinResponse = controlMessage.details as JoinResponseDetails;
+          this.joinedChannels[request.channelId] = joinResponse;
+          resolve(joinResponse);
+        }
+      });
+    });
+  }
+
+  async sendMessage(channelId: string, message: any, history: boolean = false, priority: boolean = false): Promise<MessageInfo> {
+    return new Promise<MessageInfo>((resolve, reject) => {
+      const joinInfo = this.joinedChannels[channelId];
+      if (!joinInfo) {
+        reject(new Error("Trying to send message to an unjoined channel"));
+        return;
+      }
+      const messageText = (typeof message === "string") ? message : JSON.stringify(message);
+      const payload = new TextEncoder().encode(messageText);
+      const messageInfo: MessageInfo = {
+        channelCode: joinInfo.channelCode,
+        senderCode: joinInfo.participantCode,
+        history: history,
+        priority: priority,
+        rawPayload: payload
+      };
+      try {
+        this.transport.send(channelId, messageInfo);
+        resolve(messageInfo);
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 }
 

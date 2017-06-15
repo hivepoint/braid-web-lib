@@ -1,5 +1,11 @@
+import { ChannelMessageUtils, MessageInfo } from "./interfaces";
+
 interface SocketConnectCallback {
   (err?: any): void;
+}
+
+export interface MessageCallback {
+  (message: MessageInfo, err?: Error): void;
 }
 
 interface SocketInfo {
@@ -12,11 +18,15 @@ interface SocketInfo {
 
 export class TransportManager {
   private sockets: { [url: string]: SocketInfo } = {};
+  private socketsById: { [id: string]: SocketInfo } = {};
+  private controlCallbacks: { [id: string]: MessageCallback } = {};
+  private counters: { [id: string]: number } = {};
 
-  connect(url: string): Promise<void> {
+  connect(channelId: string, url: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let info = this.sockets[url];
       if (info) {
+        this.socketsById[channelId] = info;
         if (info.connected) {
           resolve();
           return;
@@ -40,6 +50,7 @@ export class TransportManager {
           pendingCallbacks: []
         };
         this.sockets[url] = info;
+        this.socketsById[channelId] = info;
       } else {
         info.connecting = true;
         info.pendingCallbacks = [];
@@ -92,7 +103,7 @@ export class TransportManager {
         info.connecting = false;
       };
       socket.onmessage = (event) => {
-        // TODO: 
+        this.onMessageReceived(info, event);
       };
 
     } catch (err) {
@@ -107,6 +118,96 @@ export class TransportManager {
         info.connecting = false;
         info.pendingCallbacks = [];
       }
+    }
+  }
+
+  sendControlMessage(transportUrl: string, type: string, details: any, messageId?: string, callback?: MessageCallback) {
+    const info = this.sockets[transportUrl];
+    this.sendControl(messageId || this.createId("general"), info, type, details, callback);
+  }
+
+  sendControlMessageByChannel(channelId: string, type: string, details: any, callback?: MessageCallback) {
+    const info = this.socketsById[channelId];
+    this.sendControl(this.createId(channelId), info, type, details, callback);
+  }
+
+  private createId(root: string): string {
+    if (!this.counters[root]) {
+      this.counters[root] = 0;
+    }
+    this.counters[root]++;
+    return root + "-" + this.counters[root];
+  }
+
+  private sendControl(messageId: string, info: SocketInfo, type: string, details: any, callback?: MessageCallback) {
+    if (info && info.connected) {
+      if (callback) {
+        this.controlCallbacks[messageId] = callback;
+      }
+      const bytes = ChannelMessageUtils.serializeControlMessage(messageId, type, details);
+      info.socket.send(bytes.buffer);
+    } else if (callback) {
+      callback(null, new Error("Socket not connected to this destination"));
+    }
+  }
+
+  send(channelId: string, message: MessageInfo) {
+    const info = this.socketsById[channelId];
+    if (info && info.connected) {
+      const bytes = ChannelMessageUtils.serializeChannelMessage(message, 0, 0);
+      info.socket.send(bytes.buffer);
+    } else {
+      throw new Error("Socket not connected to this channel");
+    }
+  }
+
+  private onMessageReceived(info: SocketInfo, event: MessageEvent) {
+    const data = event.data;
+    if (data) {
+      const buffer = event.data as ArrayBuffer;
+      const parsed = ChannelMessageUtils.parseChannelMessage(new Uint8Array(buffer));
+      if (parsed && parsed.valid && parsed.info) {
+        this.handleMessage(info, parsed.info);
+      } else {
+        console.warn("Failed to parse message: ", parsed ? parsed.errorMessage : "null");
+      }
+      return;
+    }
+  }
+
+  private handleMessage(info: SocketInfo, message: MessageInfo) {
+    // handle control message
+    if (message.channelCode === 0 && message.controlMessagePayload) {
+      const controlMessage = message.controlMessagePayload.jsonMessage;
+      let handled = false;
+      if (controlMessage.requestId) {
+        // the client wants to handle the  message
+        if (this.controlCallbacks[controlMessage.requestId]) {
+          const cb = this.controlCallbacks[controlMessage.requestId];
+          try {
+            cb(message);
+          } catch (err) { } finally {
+            handled = true;
+            delete this.controlCallbacks[controlMessage.requestId];
+          }
+        }
+      }
+      if (!handled) {
+        // This library will try to handle the message or fire the appropriate events
+        switch (controlMessage.type) {
+          case 'ping':
+            this.sendControlMessage(info.url, 'ping-reply', {}, controlMessage.requestId);
+            break;
+          default:
+            // TODO: 
+            console.log("Control Message received", controlMessage);
+            break;
+        }
+      }
+    } else {
+      // Not a control message
+      // TODO: 
+      console.log("Message received", message);
     }
   }
 }
