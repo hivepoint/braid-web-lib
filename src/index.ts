@@ -1,6 +1,7 @@
 import { Rest } from './rest';
 import { Utils } from './utils';
 import { ClientDb } from './db';
+import { TransportManager } from './transport-manager';
 import { RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse } from './interfaces';
 
 export * from './interfaces';
@@ -12,13 +13,17 @@ export interface ChannelsClient {
   getChannelsWithProvider(registryUrl: string): Promise<GetChannelResponse[]>;
   listAllChannels(): Promise<GetChannelResponse[]>;
   getChannel(registryUrl: string, channelUrl: string): Promise<GetChannelResponse>;
+
+  connectTransport(registryUrl: string, url: string): Promise<void>;
 }
 
 class ChannelsClientImpl implements ChannelsClient {
   private db: ClientDb;
+  private transport: TransportManager;
 
   constructor() {
     this.db = new ClientDb();
+    this.transport = new TransportManager();
   }
 
   async ensureDb(): Promise<void> {
@@ -121,6 +126,25 @@ class ChannelsClientImpl implements ChannelsClient {
     }
     const headers = { Authorization: Utils.createAuth(registry) };
     return await Rest.get<GetChannelResponse>(channelUrl, headers);
+  }
+
+  async connectTransport(registryUrl: string, url: string): Promise<void> {
+    await this.ensureDb();
+    const registry = await this.db.getRegistry(registryUrl);
+    if (!registry) {
+      throw new Error("Failed to connect: Provider is not registered");
+    }
+    const fullUrl = new URL(url);
+    var query = fullUrl.search || "";
+    if (!query) {
+      query = "?"
+    } else if (query.length > 1) {
+      query = query + "&"
+    }
+    query += "id=" + encodeURIComponent(registry.id);
+    query += "&token=" + encodeURIComponent(registry.token);
+    fullUrl.search = query;
+    await this.transport.connect(fullUrl.toString());
   }
 }
 

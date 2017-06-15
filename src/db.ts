@@ -12,7 +12,7 @@ export class ClientDb {
 
   private db: IDBDatabase;
 
-  async open(): Promise<void> {
+  open(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (this.db) {
         resolve();
@@ -37,12 +37,12 @@ export class ClientDb {
     });
   }
 
-  private getStore(name: string, mode: string): IDBObjectStore {
+  getStore(name: string, mode: string): IDBObjectStore {
     const tx = this.db.transaction(name, mode);
     return tx.objectStore(name);
   }
 
-  async saveRegistry(registry: RegistrationResponse): Promise<void> {
+  saveRegistry(registry: RegistrationResponse): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const store = this.getStore(STORE_REGISTRIES, MODE_READWRITE);
       try {
@@ -59,7 +59,7 @@ export class ClientDb {
     });
   }
 
-  async getRegistry(registerUrl?: string, providerUrl?: string): Promise<RegistrationResponse> {
+  getRegistry(registerUrl?: string, providerUrl?: string): Promise<RegistrationResponse> {
     return new Promise<RegistrationResponse>((resolve, reject) => {
       const store = this.getStore(STORE_REGISTRIES, MODE_READ);
       let request: IDBRequest;
@@ -82,7 +82,7 @@ export class ClientDb {
     });
   }
 
-  async getAllRegistries(): Promise<RegistrationResponse[]> {
+  getAllRegistries(): Promise<RegistrationResponse[]> {
     return new Promise<RegistrationResponse[]>((resolve, reject) => {
       const store = this.getStore(STORE_REGISTRIES, MODE_READ);
       const request = store.openCursor();
