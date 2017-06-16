@@ -1,14 +1,18 @@
 import { Rest } from './rest';
 import { Utils } from './utils';
 import { ClientDb } from './db';
-import { TransportManager, MessageCallback } from './transport-manager';
+import { TransportManager, MessageCallback, HistoryMessageCallback } from './transport-manager';
 import {
   RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse,
-  JoinRequestDetails, JoinResponseDetails, MessageInfo, HistoryResponseDetails, HistoryRequestDetails,
-  ShareRequest, ShareResponse, ShareCodeResponse, ChannelJoinRequest
+  JoinRequestDetails, JoinResponseDetails, MessageInfo, HistoryResponseDetails, HistoryRequestDetails, LeaveRequestDetails,
+  ShareRequest, ShareResponse, ShareCodeResponse, ChannelJoinRequest, JoinNotificationDetails, LeaveNotificationDetails
 } from './interfaces';
 
 export * from './interfaces';
+
+export interface ParticipantListener {
+  (joined: JoinNotificationDetails, left: LeaveNotificationDetails): void;
+}
 
 export interface ChannelsClient {
   register(serverUrl: string, identity: any): Promise<RegistrationResponse>;
@@ -29,24 +33,23 @@ class ChannelsClientImpl implements ChannelsClient {
   private transport: TransportManager;
   private joinedChannels: { [channelId: string]: JoinResponseDetails } = {};
   private joinedChannelsByCode: { [channelCode: string]: JoinResponseDetails } = {};
-  private historyCallbacks: { [channelId: string]: MessageCallback[] } = {};
+  private historyCallbacks: { [channelId: string]: HistoryMessageCallback[] } = {};
   private channelMessageCallbacks: { [channelId: string]: MessageCallback[] } = {};
+  private channelParticipantListeners: { [channelId: string]: ParticipantListener[] } = {};
 
   constructor() {
     this.db = new ClientDb();
     this.transport = new TransportManager();
 
-    this.transport.historyMessageHandler = (message, err) => {
-      if (!err) {
-        const joinInfo = this.joinedChannelsByCode[message.channelCode];
-        if (joinInfo) {
-          const cbList = this.historyCallbacks[joinInfo.channelId];
-          if (cbList) {
-            for (const cb of cbList) {
-              try {
-                cb(message);
-              } catch (er) { /* noop */ }
-            }
+    this.transport.historyMessageHandler = (details, message) => {
+      const joinInfo = this.joinedChannelsByCode[message.channelCode];
+      if (joinInfo) {
+        const cbList = this.historyCallbacks[joinInfo.channelId];
+        if (cbList) {
+          for (const cb of cbList) {
+            try {
+              cb(details, message);
+            } catch (er) { /* noop */ }
           }
         }
       }
@@ -67,10 +70,75 @@ class ChannelsClientImpl implements ChannelsClient {
         }
       }
     };
+
+    this.transport.controlMessageHandler = (message, err) => {
+      if (!err) {
+        this.handleControlMessage(message);
+      }
+    };
+  }
+
+  private handleControlMessage(message: MessageInfo) {
+    const controlMessage = message.controlMessagePayload.jsonMessage;
+    switch (controlMessage.type) {
+      case 'join-notification': {
+        const joinNotification = controlMessage.details as JoinNotificationDetails;
+        const cbList = this.channelParticipantListeners[joinNotification.channelId];
+        if (cbList) {
+          for (const cb of cbList) {
+            try {
+              cb(joinNotification, null);
+            } catch (er) { /* noop */ }
+          }
+        }
+        break;
+      }
+      case 'leave-notification': {
+        const leaveNotification = controlMessage.details as LeaveNotificationDetails;
+        const cbList = this.channelParticipantListeners[leaveNotification.channelId];
+        if (cbList) {
+          for (const cb of cbList) {
+            try {
+              cb(null, leaveNotification);
+            } catch (er) { /* noop */ }
+          }
+        }
+        break;
+      }
+      default: break;
+    }
   }
 
   async ensureDb(): Promise<void> {
     await this.db.open();
+  }
+
+  addChannelParticipantListener(channelId: string, cb: ParticipantListener) {
+    if (channelId && cb) {
+      if (!this.channelParticipantListeners[channelId]) {
+        this.channelParticipantListeners[channelId] = [];
+      }
+      this.channelParticipantListeners[channelId].push(cb);
+    }
+  }
+
+  removeChannelParticipantListener(channelId: string, cb: ParticipantListener) {
+    if (cb && channelId) {
+      const list = this.channelParticipantListeners[channelId];
+      if (list) {
+        let index = -1;
+        for (let i = 0; i < list.length; i++) {
+          if (cb == list[i]) {
+            index = i;
+            break;
+          }
+        }
+        if (index >= 0) {
+          list.splice(index, 1);
+          this.channelParticipantListeners[channelId] = list;
+        }
+      }
+    }
   }
 
   addChannelMessageListener(channelId: string, cb: MessageCallback) {
@@ -101,7 +169,7 @@ class ChannelsClientImpl implements ChannelsClient {
     }
   }
 
-  addHistoryMessageListener(channelId: string, cb: MessageCallback) {
+  addHistoryMessageListener(channelId: string, cb: HistoryMessageCallback) {
     if (cb && channelId) {
       if (!this.historyCallbacks[channelId]) {
         this.historyCallbacks[channelId] = [];
@@ -110,7 +178,7 @@ class ChannelsClientImpl implements ChannelsClient {
     }
   }
 
-  removeHistoryMessageListener(channelId: string, cb: MessageCallback) {
+  removeHistoryMessageListener(channelId: string, cb: HistoryMessageCallback) {
     if (cb && channelId) {
       const list = this.historyCallbacks[channelId];
       if (list) {
@@ -281,6 +349,18 @@ class ChannelsClientImpl implements ChannelsClient {
           this.joinedChannels[request.channelId] = joinResponse;
           this.joinedChannelsByCode[joinResponse.channelCode] = joinResponse;
           resolve(joinResponse);
+        }
+      });
+    });
+  }
+
+  async leaveChannel(request: LeaveRequestDetails): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.transport.sendControlMessageByChannel(request.channelId, 'leave', request, (message, err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
         }
       });
     });

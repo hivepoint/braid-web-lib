@@ -314,12 +314,12 @@ export class ChannelMessageUtils {
     const topBytes = view.getUint16(0);
     const bottomBytes = view.getUint32(2);
     result.info.timestamp = topBytes * Math.pow(2, 32) + bottomBytes;
-    const delta = Date.now() - result.info.timestamp;
-    if (Math.abs(delta) > 15000) {
-      result.valid = false;
-      result.errorMessage = "Clocks are too far out of sync, or message timestamp is invalid";
-      return result;
-    }
+    // const delta = Date.now() - result.info.timestamp;
+    // if (Math.abs(delta) > 15000) {
+    //   result.valid = false;
+    //   result.errorMessage = "Clocks are too far out of sync, or message timestamp is invalid";
+    //   return result;
+    // }
     result.info.channelCode = view.getUint32(6);
     result.info.senderCode = view.getUint32(10);
     const behavior = view.getUint8(14);

@@ -1,4 +1,4 @@
-import { ChannelMessageUtils, MessageInfo } from "./interfaces";
+import { ChannelMessageUtils, MessageInfo, ControlChannelMessage, HistoryMessageDetails } from "./interfaces";
 
 interface SocketConnectCallback {
   (err?: any): void;
@@ -6,6 +6,10 @@ interface SocketConnectCallback {
 
 export interface MessageCallback {
   (message: MessageInfo, err?: Error): void;
+}
+
+export interface HistoryMessageCallback {
+  (details: HistoryMessageDetails, message: MessageInfo): void;
 }
 
 interface SocketInfo {
@@ -22,8 +26,9 @@ export class TransportManager {
   private socketsById: { [id: string]: SocketInfo } = {};
   private controlCallbacks: { [id: string]: MessageCallback } = {};
 
-  historyMessageHandler: MessageCallback;
+  historyMessageHandler: HistoryMessageCallback;
   channelMessageHandler: MessageCallback;
+  controlMessageHandler: MessageCallback;
 
   connect(channelId: string, url: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -199,6 +204,7 @@ export class TransportManager {
         // This library will try to handle the message or fire the appropriate events
         switch (controlMessage.type) {
           case 'ping':
+            console.log("Ping received: ", controlMessage.requestId);
             this.sendControlMessage(info.url, 'ping-reply', {}, controlMessage.requestId);
             break;
           case 'history-message': {
@@ -208,7 +214,7 @@ export class TransportManager {
               if (parsedMessage && parsedMessage.valid) {
                 const historyMessageInfo = parsedMessage.info;
                 try {
-                  this.historyMessageHandler(historyMessageInfo);
+                  this.historyMessageHandler((message.controlMessagePayload.jsonMessage.details as HistoryMessageDetails), historyMessageInfo);
                 } catch (ex) { /* noop */ }
               } else {
                 console.warn("Ignoring history message: Failed to parse.", parsedMessage ? parsedMessage.errorMessage : "");
@@ -217,8 +223,11 @@ export class TransportManager {
             break;
           }
           default:
-            // TODO: 
-            console.log("Control Message received", controlMessage);
+            if (this.controlMessageHandler) {
+              try {
+                this.controlMessageHandler(message);
+              } catch (ex) { /* noop */ }
+            }
             break;
         }
       }
