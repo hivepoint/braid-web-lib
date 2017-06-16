@@ -1,10 +1,11 @@
 import { Rest } from './rest';
 import { Utils } from './utils';
 import { ClientDb } from './db';
-import { TransportManager } from './transport-manager';
+import { TransportManager, MessageCallback } from './transport-manager';
 import {
   RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse,
-  JoinRequestDetails, JoinResponseDetails, MessageInfo
+  JoinRequestDetails, JoinResponseDetails, MessageInfo, HistoryResponseDetails, HistoryRequestDetails,
+  ShareRequest, ShareResponse
 } from './interfaces';
 
 export * from './interfaces';
@@ -12,7 +13,6 @@ export * from './interfaces';
 export interface ChannelsClient {
   register(serverUrl: string, identity: any): Promise<RegistrationResponse>;
   createChannel(registryUrl: string, request: ChannelCreateRequest): Promise<GetChannelResponse>;
-  connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse>;
   getChannelsWithProvider(registryUrl: string): Promise<GetChannelResponse[]>;
   listAllChannels(): Promise<GetChannelResponse[]>;
   getChannel(registryUrl: string, channelUrl: string): Promise<GetChannelResponse>;
@@ -25,14 +25,60 @@ class ChannelsClientImpl implements ChannelsClient {
   private db: ClientDb;
   private transport: TransportManager;
   private joinedChannels: { [channelId: string]: JoinResponseDetails } = {};
+  private joinedChannelsByCode: { [channelCode: string]: JoinResponseDetails } = {};
+  private historyCallbacks: { [channelId: string]: MessageCallback[] } = {};
 
   constructor() {
     this.db = new ClientDb();
     this.transport = new TransportManager();
+
+    this.transport.historyCallback = (message, err) => {
+      if (!err) {
+        const joinInfo = this.joinedChannelsByCode[message.channelCode];
+        if (joinInfo) {
+          const cbList = this.historyCallbacks[joinInfo.channelId];
+          if (cbList) {
+            for (const cb of cbList) {
+              try {
+                cb(message);
+              } catch (er) { /* noop */ }
+            }
+          }
+        }
+      }
+    };
   }
 
   async ensureDb(): Promise<void> {
     await this.db.open();
+  }
+
+  addHistoryCallback(channelId: string, cb: MessageCallback) {
+    if (cb && channelId) {
+      if (!this.historyCallbacks[channelId]) {
+        this.historyCallbacks[channelId] = [];
+      }
+      this.historyCallbacks[channelId].push(cb);
+    }
+  }
+
+  removeHistoryCallback(channelId: string, cb: MessageCallback) {
+    if (cb && channelId) {
+      const list = this.historyCallbacks[channelId];
+      if (list) {
+        let index = -1;
+        for (let i = 0; i < list.length; i++) {
+          if (cb == list[i]) {
+            index = i;
+            break;
+          }
+        }
+        if (index >= 0) {
+          list.splice(index, 1);
+          this.historyCallbacks[channelId] = list;
+        }
+      }
+    }
   }
 
   async register(serverUrl: string, identity: any): Promise<RegistrationResponse> {
@@ -77,8 +123,14 @@ class ChannelsClientImpl implements ChannelsClient {
     return await Rest.post<GetChannelResponse>(registry.services.createChannelUrl, request, headers);
   }
 
-  async connectToChannel(channelCodeUrl: string): Promise<GetChannelResponse> {
-    return null;
+  async shareChannel(registerUrl: string, request: ShareRequest): Promise<ShareResponse> {
+    await this.ensureDb();
+    const registry = await this.db.getRegistry(registerUrl);
+    if (!registry) {
+      throw new Error("Failed to create channel: Provider is not registered");
+    }
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.post<ShareResponse>(registry.services.shareChannelUrl, request, headers);
   }
 
   async getChannelsWithProvider(url: string): Promise<GetChannelResponse[]> {
@@ -161,11 +213,32 @@ class ChannelsClientImpl implements ChannelsClient {
           const controlMessage = message.controlMessagePayload.jsonMessage;
           const joinResponse = controlMessage.details as JoinResponseDetails;
           this.joinedChannels[request.channelId] = joinResponse;
+          this.joinedChannelsByCode[joinResponse.channelCode] = joinResponse;
           resolve(joinResponse);
         }
       });
     });
   }
+
+  async getHistory(request: HistoryRequestDetails): Promise<HistoryResponseDetails> {
+    return new Promise<HistoryResponseDetails>((resolve, reject) => {
+      const channelId = request.channelId;
+      const joinInfo = this.joinedChannels[channelId];
+      if (!joinInfo) {
+        reject(new Error("Trying to fetch history of an unjoined channel"));
+        return;
+      }
+      this.transport.sendControlMessageByChannel(channelId, 'history', request, (message, err) => {
+        if (err) {
+          reject(err);
+        } else {
+          const controlMessage = message.controlMessagePayload.jsonMessage;
+          const historyResponse = controlMessage.details as HistoryResponseDetails;
+          resolve(historyResponse);
+        }
+      });
+    });
+  };
 
   async sendMessage(channelId: string, message: any, history: boolean = false, priority: boolean = false): Promise<MessageInfo> {
     return new Promise<MessageInfo>((resolve, reject) => {

@@ -17,10 +17,12 @@ interface SocketInfo {
 }
 
 export class TransportManager {
+  private counters: { [id: string]: number } = {};
   private sockets: { [url: string]: SocketInfo } = {};
   private socketsById: { [id: string]: SocketInfo } = {};
   private controlCallbacks: { [id: string]: MessageCallback } = {};
-  private counters: { [id: string]: number } = {};
+
+  historyCallback: MessageCallback;
 
   connect(channelId: string, url: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -198,6 +200,21 @@ export class TransportManager {
           case 'ping':
             this.sendControlMessage(info.url, 'ping-reply', {}, controlMessage.requestId);
             break;
+          case 'history-message': {
+            if (this.historyCallback) {
+              const binaryMessage = message.controlMessagePayload.binaryPortion;
+              const parsedMessage = ChannelMessageUtils.parseChannelMessage(binaryMessage);
+              if (parsedMessage && parsedMessage.valid) {
+                const historyMessageInfo = parsedMessage.info;
+                try {
+                  this.historyCallback(historyMessageInfo);
+                } catch (ex) { /* noop */ }
+              } else {
+                console.warn("Ignoring history message: Failed to parse.");
+              }
+            }
+            break;
+          }
           default:
             // TODO: 
             console.log("Control Message received", controlMessage);
