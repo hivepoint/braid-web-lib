@@ -3,15 +3,19 @@ import { Utils } from './utils';
 import { ClientDb } from './db';
 import { TransportManager, MessageCallback, HistoryMessageCallback } from './transport-manager';
 import {
-  RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse,
+  RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse, ChannelDeleteResponseDetails, ChannelDeletedNotificationDetails,
   JoinRequestDetails, JoinResponseDetails, MessageInfo, HistoryResponseDetails, HistoryRequestDetails, LeaveRequestDetails,
-  ShareRequest, ShareResponse, ShareCodeResponse, ChannelJoinRequest, JoinNotificationDetails, LeaveNotificationDetails
+  ShareRequest, ShareResponse, ShareCodeResponse, ChannelJoinRequest, JoinNotificationDetails, LeaveNotificationDetails,
 } from './interfaces';
 
 export * from './interfaces';
 
 export interface ParticipantListener {
   (joined: JoinNotificationDetails, left: LeaveNotificationDetails): void;
+}
+
+export interface ChannelDeletedListener {
+  (details: ChannelDeletedNotificationDetails): void;
 }
 
 export interface ChannelsClient {
@@ -36,6 +40,7 @@ class ChannelsClientImpl implements ChannelsClient {
   private historyCallbacks: { [channelId: string]: HistoryMessageCallback[] } = {};
   private channelMessageCallbacks: { [channelId: string]: MessageCallback[] } = {};
   private channelParticipantListeners: { [channelId: string]: ParticipantListener[] } = {};
+  private channelDeletedListeners: ChannelDeletedListener[] = [];
 
   constructor() {
     this.db = new ClientDb();
@@ -105,12 +110,44 @@ class ChannelsClientImpl implements ChannelsClient {
         }
         break;
       }
+      case 'channel-deleted': {
+        const notification = controlMessage.details as ChannelDeletedNotificationDetails;
+        if (notification) {
+          for (const l of this.channelDeletedListeners) {
+            try {
+              l(notification);
+            } catch (er) { /* noop */ }
+          }
+        }
+        break;
+      }
       default: break;
     }
   }
 
   async ensureDb(): Promise<void> {
     await this.db.open();
+  }
+
+  addChannelDeletedListener(listener: ChannelDeletedListener) {
+    if (listener) {
+      this.channelDeletedListeners.push(listener);
+    }
+  }
+
+  removeChannelDeletedListener(listener: ChannelDeletedListener) {
+    if (listener) {
+      let index = -1;
+      for (let i = 0; i < this.channelDeletedListeners.length; i++) {
+        if (listener == this.channelDeletedListeners[i]) {
+          index = i;
+          break;
+        }
+      }
+      if (index >= 0) {
+        this.channelDeletedListeners.splice(index, 1);
+      }
+    }
   }
 
   addChannelParticipantListener(channelId: string, cb: ParticipantListener) {
@@ -317,6 +354,16 @@ class ChannelsClientImpl implements ChannelsClient {
     }
     const headers = { Authorization: Utils.createAuth(registry) };
     return await Rest.get<GetChannelResponse>(channelUrl, headers);
+  }
+
+  async deleteChannel(registryUrl: string, channelDeleteUrl: string): Promise<ChannelDeleteResponseDetails> {
+    await this.ensureDb();
+    const registry = await this.db.getRegistry(registryUrl);
+    if (!registry) {
+      throw new Error("Failed to delete channel: Provider is not registered");
+    }
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.delete<ChannelDeleteResponseDetails>(channelDeleteUrl, headers);
   }
 
   async connectTransport(registryUrl: string, channelId: string, url: string): Promise<void> {
