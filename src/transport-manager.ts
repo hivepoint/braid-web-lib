@@ -22,7 +22,8 @@ export class TransportManager {
   private socketsById: { [id: string]: SocketInfo } = {};
   private controlCallbacks: { [id: string]: MessageCallback } = {};
 
-  historyCallback: MessageCallback;
+  historyMessageHandler: MessageCallback;
+  channelMessageHandler: MessageCallback;
 
   connect(channelId: string, url: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -201,16 +202,16 @@ export class TransportManager {
             this.sendControlMessage(info.url, 'ping-reply', {}, controlMessage.requestId);
             break;
           case 'history-message': {
-            if (this.historyCallback) {
+            if (this.historyMessageHandler) {
               const binaryMessage = message.controlMessagePayload.binaryPortion;
               const parsedMessage = ChannelMessageUtils.parseChannelMessage(binaryMessage);
               if (parsedMessage && parsedMessage.valid) {
                 const historyMessageInfo = parsedMessage.info;
                 try {
-                  this.historyCallback(historyMessageInfo);
+                  this.historyMessageHandler(historyMessageInfo);
                 } catch (ex) { /* noop */ }
               } else {
-                console.warn("Ignoring history message: Failed to parse.");
+                console.warn("Ignoring history message: Failed to parse.", parsedMessage ? parsedMessage.errorMessage : "");
               }
             }
             break;
@@ -223,8 +224,13 @@ export class TransportManager {
       }
     } else {
       // Not a control message
-      // TODO: 
-      console.log("Message received", message);
+      if (this.channelMessageHandler) {
+        try {
+          this.channelMessageHandler(message);
+        } catch (ex) { /* noop */ }
+      } else {
+        console.log("Channel message received", message);
+      }
     }
   }
 }

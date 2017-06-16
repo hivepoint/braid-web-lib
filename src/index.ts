@@ -5,7 +5,7 @@ import { TransportManager, MessageCallback } from './transport-manager';
 import {
   RegistrationResponse, ChannelServerResponse, ChannelCreateRequest, GetChannelResponse, ChannelListResponse,
   JoinRequestDetails, JoinResponseDetails, MessageInfo, HistoryResponseDetails, HistoryRequestDetails,
-  ShareRequest, ShareResponse
+  ShareRequest, ShareResponse, ShareCodeResponse, ChannelJoinRequest
 } from './interfaces';
 
 export * from './interfaces';
@@ -19,6 +19,9 @@ export interface ChannelsClient {
 
   connectTransport(registryUrl: string, channelId: string, url: string): Promise<void>;
   joinChannel(request: JoinRequestDetails): Promise<JoinResponseDetails>;
+
+  getInviteInfo(inviteCode: string): Promise<ShareCodeResponse>;
+  acceptInvitation(inviteCode: string, identity: any, participantDetails: any): Promise<GetChannelResponse>;
 }
 
 class ChannelsClientImpl implements ChannelsClient {
@@ -27,16 +30,33 @@ class ChannelsClientImpl implements ChannelsClient {
   private joinedChannels: { [channelId: string]: JoinResponseDetails } = {};
   private joinedChannelsByCode: { [channelCode: string]: JoinResponseDetails } = {};
   private historyCallbacks: { [channelId: string]: MessageCallback[] } = {};
+  private channelMessageCallbacks: { [channelId: string]: MessageCallback[] } = {};
 
   constructor() {
     this.db = new ClientDb();
     this.transport = new TransportManager();
 
-    this.transport.historyCallback = (message, err) => {
+    this.transport.historyMessageHandler = (message, err) => {
       if (!err) {
         const joinInfo = this.joinedChannelsByCode[message.channelCode];
         if (joinInfo) {
           const cbList = this.historyCallbacks[joinInfo.channelId];
+          if (cbList) {
+            for (const cb of cbList) {
+              try {
+                cb(message);
+              } catch (er) { /* noop */ }
+            }
+          }
+        }
+      }
+    };
+
+    this.transport.channelMessageHandler = (message, err) => {
+      if (!err) {
+        const joinInfo = this.joinedChannelsByCode[message.channelCode];
+        if (joinInfo) {
+          const cbList = this.channelMessageCallbacks[joinInfo.channelId];
           if (cbList) {
             for (const cb of cbList) {
               try {
@@ -53,7 +73,35 @@ class ChannelsClientImpl implements ChannelsClient {
     await this.db.open();
   }
 
-  addHistoryCallback(channelId: string, cb: MessageCallback) {
+  addChannelMessageListener(channelId: string, cb: MessageCallback) {
+    if (cb && channelId) {
+      if (!this.channelMessageCallbacks[channelId]) {
+        this.channelMessageCallbacks[channelId] = [];
+      }
+      this.channelMessageCallbacks[channelId].push(cb);
+    }
+  }
+
+  removeChannelMessageListener(channelId: string, cb: MessageCallback) {
+    if (cb && channelId) {
+      const list = this.channelMessageCallbacks[channelId];
+      if (list) {
+        let index = -1;
+        for (let i = 0; i < list.length; i++) {
+          if (cb == list[i]) {
+            index = i;
+            break;
+          }
+        }
+        if (index >= 0) {
+          list.splice(index, 1);
+          this.channelMessageCallbacks[channelId] = list;
+        }
+      }
+    }
+  }
+
+  addHistoryMessageListener(channelId: string, cb: MessageCallback) {
     if (cb && channelId) {
       if (!this.historyCallbacks[channelId]) {
         this.historyCallbacks[channelId] = [];
@@ -62,7 +110,7 @@ class ChannelsClientImpl implements ChannelsClient {
     }
   }
 
-  removeHistoryCallback(channelId: string, cb: MessageCallback) {
+  removeHistoryMessageListener(channelId: string, cb: MessageCallback) {
     if (cb && channelId) {
       const list = this.historyCallbacks[channelId];
       if (list) {
@@ -131,6 +179,24 @@ class ChannelsClientImpl implements ChannelsClient {
     }
     const headers = { Authorization: Utils.createAuth(registry) };
     return await Rest.post<ShareResponse>(registry.services.shareChannelUrl, request, headers);
+  }
+
+  async getInviteInfo(inviteCode: string): Promise<ShareCodeResponse> {
+    return await Rest.get<ShareCodeResponse>(inviteCode);
+  }
+
+  async acceptInvitation(inviteCode: string, identity: any, participantDetails: any): Promise<GetChannelResponse> {
+    const shareCodeResponse = await this.getInviteInfo(inviteCode);
+    if (!shareCodeResponse) {
+      throw new Error("Invalid share code");
+    }
+    const registry = await this.register(shareCodeResponse.providerUrl, identity);
+    const request: ChannelJoinRequest = {
+      invitationId: shareCodeResponse.invitationId,
+      details: participantDetails
+    };
+    const headers = { Authorization: Utils.createAuth(registry) };
+    return await Rest.post<GetChannelResponse>(shareCodeResponse.acceptChannelUrl, request, headers);
   }
 
   async getChannelsWithProvider(url: string): Promise<GetChannelResponse[]> {
